@@ -13,6 +13,7 @@ function SqlCode({ code, dark, maxHeight = "18rem" }) {
       language="sql"
       style={dark ? oneDark : oneLight}
       customStyle={{ margin: 0, borderRadius: "0.5rem", fontSize: "0.8rem", maxHeight, background: dark ? "#0f172a" : "#f8fafc" }}
+      codeTagProps={{ style: { background: "transparent" } }}
       wrapLongLines
     >
       {code || ""}

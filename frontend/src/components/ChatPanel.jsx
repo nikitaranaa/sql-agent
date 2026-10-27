@@ -86,7 +86,11 @@ export default function ChatPanel({
   messages, loading, steps, error, input, onInput, onSend, examples, selectedId, onSelect, inputRef,
 }) {
   const bottom = useRef(null);
-  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [messages.length, loading, steps.length]);
+  // Block body on purpose: newer Chrome returns a Promise from scrollIntoView, and an
+  // effect must not return anything but a clean-up function.
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, loading, steps.length]);
 
   const submit = (e) => {
     e.preventDefault();

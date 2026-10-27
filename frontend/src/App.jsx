@@ -33,9 +33,9 @@ export default function App() {
   const active = sessions.find((s) => s.id === activeId) || sessions[0];
   const messages = active.messages;
 
-  useEffect(() => saveSessions(sessions), [sessions]);
-  useEffect(() => savePref("dialect", dialect), [dialect]);
-  useEffect(() => savePref("execute", execute), [execute]);
+  useEffect(() => { saveSessions(sessions); }, [sessions]);
+  useEffect(() => { savePref("dialect", dialect); }, [dialect]);
+  useEffect(() => { savePref("execute", execute); }, [execute]);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch { /* ignore */ }
