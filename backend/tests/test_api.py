@@ -89,3 +89,8 @@ def test_history_roundtrip(client, fake_llm):
 def test_graph_endpoint_returns_mermaid(client):
     text = client.get("/graph").text
     assert "validate_sql" in text and "generate_sql" in text
+
+
+def test_root_redirects_to_docs(client):
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code in (302, 307) and r.headers["location"] == "/docs"

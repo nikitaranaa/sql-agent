@@ -19,7 +19,7 @@ from typing import Any, Iterator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from langchain_core.messages import HumanMessage
 
 from app.config import get_settings
@@ -115,6 +115,12 @@ def _run_turn(req: ChatRequest) -> Iterator[tuple[str, Any]]:
         response = {"type": "error", "message": f"Something went wrong while processing the request: {exc}"}
     response["steps"] = steps
     yield "result", ChatResponse(**response).model_dump()
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    # This is the API; the chat UI lives on the frontend. Send visitors to the docs.
+    return RedirectResponse("/docs")
 
 
 @app.get("/health")
