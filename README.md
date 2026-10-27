@@ -10,9 +10,9 @@ executes. Invalid SQL loops back to the model with the exact error, up to 3 atte
 
 | | |
 |---|---|
-| **Live app** | `<your Vercel URL>` (the backend is on Render's free tier and may take ~1 minute to wake up on the first request) |
-| **API docs** | `<your Render URL>/docs` |
-| **Demo video** | `<your Loom link>` |
+| **Live app** | **https://sql-agent-theta.vercel.app** (the backend is on Render's free tier and may take ~1 minute to wake up on the first request) |
+| **API docs** | https://sql-agent-api-teqh.onrender.com/docs |
+| **Demo video** | _coming soon_ |
 | **Stack** | LangGraph · LangChain · FastAPI · sqlglot · SQLite · React + Vite + Tailwind · Docker |
 
 ---
