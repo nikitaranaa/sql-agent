@@ -1,0 +1,53 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	preflight(preflight)
+	detect_intent(detect_intent)
+	check_scope(check_scope)
+	load_schema(load_schema)
+	generate_sql(generate_sql)
+	optimize_sql(optimize_sql)
+	debug_sql(debug_sql)
+	validate_sql(validate_sql)
+	analyze_query(analyze_query)
+	execute_query(execute_query)
+	explain(explain)
+	respond(respond)
+	refuse(refuse)
+	clarify(clarify)
+	fail(fail)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> preflight;
+	analyze_query -.-> execute_query;
+	analyze_query -.-> explain;
+	check_scope -.-> clarify;
+	check_scope -.-> load_schema;
+	check_scope -.-> refuse;
+	debug_sql --> validate_sql;
+	detect_intent --> check_scope;
+	execute_query --> explain;
+	explain --> respond;
+	generate_sql -.-> fail;
+	generate_sql -.-> validate_sql;
+	load_schema -.-> debug_sql;
+	load_schema -.-> generate_sql;
+	load_schema -.-> optimize_sql;
+	load_schema -.-> validate_sql;
+	optimize_sql --> validate_sql;
+	preflight -.-> detect_intent;
+	preflight -.-> refuse;
+	validate_sql -.-> analyze_query;
+	validate_sql -.-> debug_sql;
+	validate_sql -.-> fail;
+	validate_sql -.-> generate_sql;
+	clarify --> __end__;
+	fail --> __end__;
+	refuse --> __end__;
+	respond --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

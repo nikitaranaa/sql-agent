@@ -1,0 +1,21 @@
+# Run the whole app locally with Docker:  docker compose up --build
+# Frontend: http://localhost:5173   Backend: http://localhost:8000/docs
+services:
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      PORT: 8000
+      CORS_ORIGINS: http://localhost:5173
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
