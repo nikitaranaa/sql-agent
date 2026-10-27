@@ -125,10 +125,14 @@ def test_prompt_injection_refused(graph, fake_llm):
 
 def test_ambiguous_request_asks_for_clarification(graph, fake_llm):
     fake_llm.queue_intent("clarify", needs_clarification=True,
-                          clarification_question="Best by revenue, or by number of orders?")
+                          clarification_question="Best by revenue, or by number of orders?",
+                          clarification_options=["Top 5 products by revenue", "Top 5 products by orders",
+                                                 "Top 5 customers by revenue", "a fourth one"])
     resp = run(graph, "show me the best ones")["response"]
     assert resp == {"type": "clarification", "intent": "clarify",
-                    "message": "Best by revenue, or by number of orders?"}
+                    "message": "Best by revenue, or by number of orders?",
+                    "options": ["Top 5 products by revenue", "Top 5 products by orders",
+                                "Top 5 customers by revenue"]}
 
 
 def test_optimize_flow(graph, fake_llm):
@@ -231,3 +235,11 @@ def test_schema_wrapped_llm_answer_is_recovered():
                                 '"needs_clarification": false}, "required": []}')
     assert chains._salvage(wrapped, chains.IntentResult).intent == "optimize"
     assert chains._salvage(AIMessage(content="no json here"), chains.IntentResult) is None
+
+
+def test_large_result_is_reported_as_truncated(graph, fake_llm):
+    # The safety LIMIT must leave room for one extra row, or truncation goes unnoticed.
+    fake_llm.queue_intent("generate")
+    fake_llm.sqls.append("SELECT * FROM OrderItems")
+    results = run(graph, "all order items")["response"]["results"]
+    assert results["row_count"] == 100 and results["truncated"] is True

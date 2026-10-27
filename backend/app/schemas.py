@@ -15,6 +15,10 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     dialect: Dialect = "sqlite"
     execute: bool = Field(True, description="Run the validated query against the sample database")
+    # The browser's copy of the last successful query. Used only when the server has no memory
+    # of this session (e.g. after a restart), and re-validated before use.
+    previous_sql: str | None = Field(None, max_length=10000)
+    previous_question: str | None = Field(None, max_length=4000)
 
 
 class Explanation(BaseModel):
@@ -50,6 +54,44 @@ class ChatResponse(BaseModel):
     tables: list[str] = []
     steps: list[str] = []
     last_attempt: str | None = None
+    options: list[str] = []          # clickable answers to a clarifying question
+    follow_ups: list[str] = []       # suggested next questions
+    based_on: str | None = None      # the question a follow-up modified
+
+
+class RunRequest(BaseModel):
+    """SQL the user edited in the panel. Validated exactly like generated SQL."""
+    sql: str = Field(min_length=1, max_length=10000)
+    dialect: Dialect = "sqlite"
+    question: str | None = Field(None, max_length=4000)
+    session_id: str | None = Field(None, pattern=r"^[A-Za-z0-9_-]{8,64}$")
+
+
+class ExportRequest(BaseModel):
+    sql: str = Field(min_length=1, max_length=10000, description="Validated SQLite query")
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,64}$")
+    question: str = Field(max_length=4000)
+    sql: str = Field(max_length=10000)
+    rating: Literal["up", "down"]
+    comment: str = Field("", max_length=1000)
+
+
+class AuthRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class AuthResponse(BaseModel):
+    token: str
+    username: str
+
+
+class ConversationIn(BaseModel):
+    title: str = Field(max_length=200)
+    messages: list[Any]
 
 
 class HistoryMessage(BaseModel):

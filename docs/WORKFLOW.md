@@ -89,7 +89,7 @@ checkpointer keeps `messages`, `last_sql` and `last_question`.
 | 1 | `preflight` | code | Looks for prompt-injection phrases, destructive requests (regex + parsing any pasted SQL with sqlglot) and obvious off-topic questions. Extracts pasted SQL. Appends the user message to `messages`. |
 | 2 | `detect_intent` | LLM (fast) | Classifies the message using the schema, the previous question and SQL, and recent history. Returns `IntentResult` (intent, clarification question, safe alternative). |
 | 3 | `check_scope` | code | Policy on top of the LLM: a code-detected destructive request stays destructive whatever the LLM said; optimize/debug/explain without SQL uses `last_sql` ("explain that") or asks for it; a follow-up with no previous query becomes a fresh generate. |
-| 4 | `load_schema` | code | Picks the tables to send (all of them for small schemas; keyword + foreign-key neighbours for large ones) and builds the DDL prompt. For optimize/debug/explain it seeds `sql` with the user's query. |
+| 4 | `load_schema` | code | Picks the tables to send (all of them for small schemas; BM25-ranked top 8 + their foreign-key neighbours for large ones) and builds the DDL prompt. For optimize/debug/explain it seeds `sql` with the user's query. |
 | 5a | `generate_sql` | LLM (strong) | First pass: generate (with the previous query when it's a follow-up). Retry pass: **repair**, given the failing SQL and the validator's exact errors. |
 | 5b | `optimize_sql` | LLM (strong) | Gets the original query's `EXPLAIN QUERY PLAN`; returns optimized SQL, changes, removed joins and index suggestions. |
 | 5c | `debug_sql` | code + LLM | Runs the validator on the user's SQL first, then sends those concrete errors to the model, which returns issues (problem / why / fix) and corrected SQL. |
@@ -129,7 +129,8 @@ the UI ("self-corrected 1×").
 ## Conversation memory
 
 - The frontend creates a `session_id` (`crypto.randomUUID()`) per conversation and sends it with every message.
-- The API passes it as `thread_id`. The checkpointer (`MemorySaver`, or `SqliteSaver` when `CHECKPOINT_DB` is set) restores that conversation's state before the turn.
+- The API passes it as `thread_id` (prefixed with the user id when signed in, so one account can't read another's memory). The checkpointer restores that conversation's state before the turn: `PostgresSaver` when `DATABASE_URL` is set (survives restarts), `SqliteSaver` when `CHECKPOINT_DB` is set, otherwise `MemorySaver`.
+- If the server has no memory of the conversation (in-memory storage after a restart), the browser's copy of the last valid query is used instead, but only after it passes the validator again.
 - `last_sql` is written only after a query passes validation, so a follow-up always builds on a known-good query.
 - For a `followup`, the generation prompt contains the previous question and query, with the instruction *"Modify the previous query… keep its existing filters, joins and columns unless the user asks to change them"*.
 - Only the last `HISTORY_TURNS` (6) turns go to the classifier, which keeps cost and confusion low.
@@ -139,7 +140,9 @@ Demo chain: `Show all customers` → `Only those from California` (adds `WHERE S
 
 ## Streaming
 
-`POST /chat/stream` runs `graph.stream(..., stream_mode="updates")` and sends one
-server-sent event per node (`event: step`), then the final payload (`event: result`).
-The UI shows each step live ("Validating SQL…", "Running query (read-only)…").
+`POST /chat/stream` runs `graph.stream(..., stream_mode=["updates", "custom"])` and sends
+one server-sent event per node (`event: step`), then the explanation text as it is written
+(`event: token`, sent from the `explain` node through LangGraph's stream writer), then the
+final payload (`event: result`). The UI shows each step live, then the explanation typing out.
+Only the explanation streams: the SQL is shown once it has passed validation.
 `POST /chat` runs the same generator and returns only the result.

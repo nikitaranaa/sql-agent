@@ -9,6 +9,7 @@ __pycache__/
 .pytest_cache/
 backend/app/db/app.db
 backend/checkpoints.db
+backend/data/
 
 # Node
 node_modules/

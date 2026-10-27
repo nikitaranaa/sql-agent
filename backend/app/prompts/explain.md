@@ -5,6 +5,8 @@ Explain this SQLite query in plain English for a business user who does not know
 - Then 2-5 short bullet points: tables used and how they're joined, filters, grouping /
   aggregation, sorting and limits. Use the business meaning, not SQL jargon.
 - Do not repeat the SQL. Do not invent columns.
+- Also suggest 2-3 short follow-up questions that would refine this query, phrased as the
+  user would type them (e.g. "Only those from California", "Sort by hire date").
 
 Context: {{context}}
 

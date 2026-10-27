@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+
+# Before any app import: tests must never touch the real account store or Postgres.
+os.environ["STATE_DB"] = os.path.join(tempfile.mkdtemp(), "state.db")
+os.environ["DATABASE_URL"] = ""
+os.environ.setdefault("SECRET_KEY", "test-secret")
+
 from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
 
+from app import ratelimit
 from app.config import get_settings
 from app.db.database import get_schema
 from app.db.seed import build_database
@@ -57,9 +66,14 @@ class FakeLLM:
         self.calls.append(("debug_sql", {"sql": sql, "errors": errors}))
         return self.debug_result
 
-    def explain_sql(self, sql, context, schema_prompt, results_note=""):
+    def explain_sql(self, sql, context, schema_prompt, results_note="", on_token=None):
         self.calls.append(("explain_sql", {"sql": sql, "context": context}))
-        return chains.ExplanationResult(summary=f"Explains: {sql}", details=["detail"])
+        summary = f"Explains: {sql}"
+        if on_token:  # stream it in two pieces, like the real model
+            on_token(summary[:5])
+            on_token(summary[5:])
+        return chains.ExplanationResult(summary=summary, details=["detail"],
+                                        follow_ups=["Only those from California"])
 
     def called(self, name: str) -> list[dict[str, Any]]:
         return [kw for n, kw in self.calls if n == name]
@@ -71,3 +85,9 @@ def fake_llm(monkeypatch) -> FakeLLM:
     for name in ("classify_intent", "generate_sql", "repair_sql", "optimize_sql", "debug_sql", "explain_sql"):
         monkeypatch.setattr(chains, name, getattr(fake, name))
     return fake
+
+
+@pytest.fixture(autouse=True)
+def fresh_rate_limits():
+    ratelimit.reset()
+    yield

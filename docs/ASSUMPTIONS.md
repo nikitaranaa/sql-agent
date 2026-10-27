@@ -29,10 +29,15 @@
     meaningfully explained.
 
 ## Infrastructure
-12. No authentication: the brief asks for a publicly accessible app and the data is synthetic.
-    In production you would add auth and rate limiting in front of `/chat`.
-13. Conversation memory is in-process (`MemorySaver`) by default and resets on restart or when
-    the free tier sleeps; set `CHECKPOINT_DB` to persist it. The browser keeps visible history in
-    `localStorage` either way.
+12. Accounts are **optional**: the brief asks for a publicly accessible app, so anyone can use it
+    without signing in. Signing in adds conversation sync across devices and per-user limits.
+    Requests are rate-limited per user, or per IP when signed out.
+13. Without `DATABASE_URL`, the agent's memory is in-process (`MemorySaver`) and resets on restart
+    or when the free tier sleeps. The browser then sends its copy of the last valid query, which
+    the server re-validates, so follow-ups keep working. With `DATABASE_URL` (Postgres), memory,
+    accounts, synced chats and feedback all persist.
 14. Any of OpenAI, Anthropic or Groq can be used; the model names in `.env.example` are
     defaults to adjust to your account.
+15. Rate-limit counters live in the server's memory, which suits one instance. Running several
+    instances would need a shared store such as Redis.
+16. "Stop" cancels the request in the browser; the server finishes the work it already started.

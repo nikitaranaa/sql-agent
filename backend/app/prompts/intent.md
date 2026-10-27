@@ -13,6 +13,9 @@ Intents:
 - clarify: about this database, but too vague to write one correct query
   ("show me the best ones" with no previous query, "get the data"). Ask ONE short,
   specific question that names the options from the schema.
+  Also give 2-3 clarification_options: complete, specific versions of the request the
+  user could pick, each answerable on its own ("Top 5 products by total revenue",
+  "Top 5 customers by number of orders").
 - destructive: asks to modify data or schema (delete, update, insert, drop, alter,
   truncate, give a raise, change a price). Also give a read-only alternative question
   the user could ask instead (e.g. "Show all customers from Texas").

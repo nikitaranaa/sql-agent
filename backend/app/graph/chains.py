@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Literal
+from typing import Callable, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, ValidationError
@@ -31,6 +31,11 @@ class IntentResult(BaseModel):
     intent: Intent
     needs_clarification: bool = Field(False, description="True when intent is clarify")
     clarification_question: str = Field("", description="One short question, only for clarify")
+    clarification_options: list[str] = Field(
+        default_factory=list,
+        description="For clarify: 2-3 complete, specific rewordings of the request the user can pick, "
+                    "each answerable on its own (e.g. 'Top 5 products by total revenue')",
+    )
     safe_alternative: str = Field(
         "", description="For destructive: a read-only question the user could ask instead"
     )
@@ -68,6 +73,10 @@ class DebugResult(BaseModel):
 class ExplanationResult(BaseModel):
     summary: str = Field(description="One sentence: what the query returns")
     details: list[str] = Field(default_factory=list, description="2-5 short plain-English bullets")
+    follow_ups: list[str] = Field(
+        default_factory=list,
+        description="2-3 short follow-up questions that refine this query, e.g. 'Only those from California'",
+    )
 
 
 # --- Helpers ----------------------------------------------------------------------
@@ -197,6 +206,62 @@ def debug_sql(message: str, sql: str, errors: list[str], schema_prompt: str) -> 
     return _call("strong", schema_prompt, prompt, DebugResult)
 
 
-def explain_sql(sql: str, context: str, schema_prompt: str, results_note: str = "") -> ExplanationResult:
+def explain_sql(
+    sql: str, context: str, schema_prompt: str, results_note: str = "",
+    on_token: Callable[[str], None] | None = None,
+) -> ExplanationResult:
+    """Plain-English explanation. With ``on_token`` the text is streamed as it is written.
+
+    Streaming uses a simple line format (summary, bullets, follow-ups) instead of JSON so the
+    visible text can be shown while it arrives. If streaming fails or the text can't be
+    parsed, it falls back to the structured call.
+    """
+    if on_token is not None:
+        try:
+            result = _stream_explanation(sql, context, schema_prompt, results_note, on_token)
+            if result is not None:
+                return result
+        except Exception as exc:
+            logger.warning("Streaming explanation failed, falling back: %s", exc)
     prompt = prompts.render("explain", sql=sql, context=context, results_note=results_note)
     return _call("strong", schema_prompt, prompt, ExplanationResult)
+
+
+FOLLOW_UP_MARKER = "FOLLOW-UPS:"
+
+
+def _stream_explanation(sql, context, schema_prompt, results_note, on_token) -> ExplanationResult | None:
+    messages = [
+        SystemMessage(content=prompts.render("system", schema=schema_prompt)),
+        HumanMessage(content=prompts.render("explain_stream", sql=sql, context=context,
+                                            results_note=results_note)),
+    ]
+    text, sent = "", 0
+    for chunk in get_chat_model("strong").stream(messages):
+        piece = chunk.content if isinstance(chunk.content, str) else ""
+        if not piece:
+            continue
+        text += piece
+        # Show everything before the follow-up marker. Hold back a marker-sized tail in
+        # case the marker is split across chunks.
+        cut = text.find(FOLLOW_UP_MARKER)
+        visible_end = cut if cut != -1 else max(sent, len(text) - len(FOLLOW_UP_MARKER))
+        if visible_end > sent:
+            on_token(text[sent:visible_end])
+            sent = visible_end
+    if FOLLOW_UP_MARKER not in text and len(text) > sent:
+        on_token(text[sent:])
+    return parse_streamed_explanation(text)
+
+
+def parse_streamed_explanation(text: str) -> ExplanationResult | None:
+    body, _, follow = text.partition(FOLLOW_UP_MARKER)
+    lines = [ln.strip() for ln in body.strip().splitlines() if ln.strip()]
+    if not lines:
+        return None
+    bullet = re.compile(r"^[-*•]\s+|^\d+[.)]\s+")
+    summary = bullet.sub("", lines[0]).strip("* ")
+    details = [bullet.sub("", ln).strip() for ln in lines[1:]]
+    follow_ups = [bullet.sub("", ln).strip().strip('"') for ln in follow.splitlines() if ln.strip()]
+    return ExplanationResult(summary=summary, details=[d for d in details if d][:6],
+                             follow_ups=[f for f in follow_ups if f][:3])

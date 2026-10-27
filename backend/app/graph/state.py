@@ -25,6 +25,7 @@ class AgentState(TypedDict, total=False):
     user_sql: str | None         # SQL pasted by the user (optimize / debug / explain)
     intent: str | None
     clarification_question: str
+    clarification_options: list[str]
     safe_alternative: str
     tables: list[str]            # tables retrieved into the prompt
     schema_prompt: str
@@ -58,6 +59,7 @@ def new_turn_input(question: str, dialect: str = "sqlite", execute: bool = True)
         "user_sql": None,
         "intent": None,
         "clarification_question": "",
+        "clarification_options": [],
         "safe_alternative": "",
         "tables": [],
         "schema_prompt": "",

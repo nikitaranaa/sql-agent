@@ -71,8 +71,25 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
 
 
 def make_checkpointer() -> BaseCheckpointSaver:
-    """MemorySaver by default (lost on restart); SqliteSaver when CHECKPOINT_DB is set."""
-    path = get_settings().checkpoint_db
+    """Where conversation memory lives.
+
+    PostgresSaver when DATABASE_URL is set (survives restarts and free-tier sleep),
+    SqliteSaver when CHECKPOINT_DB is set, otherwise MemorySaver (lost on restart).
+    """
+    settings = get_settings()
+    if settings.database_url:
+        from langgraph.checkpoint.postgres import PostgresSaver
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+
+        pool = ConnectionPool(
+            settings.database_url, min_size=1, max_size=5, open=True,
+            kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+        )
+        saver = PostgresSaver(pool)
+        saver.setup()   # creates the checkpoint tables on first run
+        return saver
+    path = settings.checkpoint_db
     if path:
         import sqlite3
 

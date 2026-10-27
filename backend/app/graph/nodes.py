@@ -5,10 +5,13 @@ LLM work goes through ``chains``; every decision about safety is made here in co
 
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.config import get_stream_writer
 
 from app.analysis.cost import estimate_cost
 from app.config import get_settings
@@ -46,29 +49,64 @@ def schema_terms(schema: SchemaInfo) -> set[str]:
     return terms
 
 
-def select_relevant_tables(schema: SchemaInfo, text: str, extra_sql: str | None = None) -> list[str]:
-    """Schema retrieval. Small schemas go in whole; large ones get keyword + FK-neighbour tables.
+def _tokens(text: str) -> list[str]:
+    """Split identifiers and words: 'OrderItems', 'unit_price' -> order, item, unit, price."""
+    words = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+", text.replace("_", " "))
+    return [w.lower().rstrip("s") for w in words if len(w) > 1]
 
-    This is the hook for scaling to hundreds of tables (swap the keyword score for
-    embedding similarity without changing the graph).
-    """
+
+def rank_tables(schema: SchemaInfo, text: str, k1: float = 1.5, b: float = 0.75) -> list[tuple[float, str]]:
+    """BM25 score of each table for the question. A table's document is its name (weighted x3),
+    its column names and the tables it references."""
+    docs = {}
+    for t in schema.tables.values():
+        doc = _tokens(t.name) * 3 + _tokens(" ".join(t.column_names))
+        doc += _tokens(" ".join(fk.ref_table for fk in t.foreign_keys))
+        docs[t.name] = Counter(doc)
+    if not docs:
+        return []
+    avg_len = sum(sum(d.values()) for d in docs.values()) / len(docs)
+    query = set(_tokens(text))
+    scores = []
+    for name, doc in docs.items():
+        length = sum(doc.values())
+        score = 0.0
+        for term in query:
+            tf = doc.get(term, 0)
+            if not tf:
+                continue
+            df = sum(1 for d in docs.values() if term in d)
+            idf = math.log(1 + (len(docs) - df + 0.5) / (df + 0.5))
+            score += idf * tf * (k1 + 1) / (tf + k1 * (1 - b + b * length / avg_len))
+        if score > 0:
+            scores.append((score, name))
+    return sorted(scores, reverse=True)
+
+
+def select_relevant_tables(schema: SchemaInfo, text: str, extra_sql: str | None = None,
+                           top_k: int = 8) -> list[str]:
+    """Schema retrieval. Small schemas go in whole; large ones get the BM25 top-k tables plus
+    their foreign-key neighbours (so the joins between them are possible)."""
     names = list(schema.tables)
     if len(names) <= get_settings().schema_full_threshold:
         return names
-    words = {w.lower().rstrip("s") for w in re.findall(r"[A-Za-z_]+", text + " " + (extra_sql or ""))}
-    scored = []
-    for t in schema.tables.values():
-        tokens = {t.name.lower().rstrip("s")} | {c.lower().rstrip("s") for c in t.column_names}
-        tokens |= {w.lower().rstrip("s") for w in re.findall(r"[A-Z][a-z]+", t.name)}
-        score = len(words & tokens) + (3 if t.name.lower().rstrip("s") in words else 0)
-        if score:
-            scored.append((score, t.name))
-    chosen = [n for _, n in sorted(scored, reverse=True)[:8]]
-    for name in list(chosen):  # pull in FK neighbours so joins are possible
+    chosen = [name for _, name in rank_tables(schema, f"{text} {extra_sql or ''}")[:top_k]]
+    for name in list(chosen):
         for fk in schema.tables[name].foreign_keys:
             if fk.ref_table in schema.tables and fk.ref_table not in chosen:
                 chosen.append(fk.ref_table)
     return chosen or names[: get_settings().schema_full_threshold]
+
+
+def describe_results(results: dict[str, Any] | None) -> str:
+    """A short note about the results, so the explanation can mention what came back."""
+    if not results:
+        return ""
+    return (
+        f"\nThe query returned {results['row_count']} row(s)"
+        f"{' (truncated)' if results['truncated'] else ''}. "
+        f"Columns: {', '.join(results['columns'])}. First rows: {results['rows'][:3]}"
+    )
 
 
 def _history_text(state: AgentState) -> str:
@@ -115,6 +153,7 @@ def detect_intent(state: AgentState) -> dict[str, Any]:
     return {
         "intent": result.intent,
         "clarification_question": result.clarification_question,
+        "clarification_options": result.clarification_options[:3],
         "safe_alternative": result.safe_alternative,
     }
 
@@ -230,7 +269,8 @@ def analyze_query(state: AgentState) -> dict[str, Any]:
 
 def execute_query(state: AgentState) -> dict[str, Any]:
     settings = get_settings()
-    sql = ensure_limit(state["sql"], settings.max_result_rows)
+    # One extra row so execute_readonly can tell the result was cut off.
+    sql = ensure_limit(state["sql"], settings.max_result_rows + 1)
     try:
         return {"results": execute_readonly(sql), "execution_error": None}
     except QueryTimeoutError as exc:
@@ -248,17 +288,11 @@ def explain(state: AgentState) -> dict[str, Any]:
         "debug": "Corrected version of the user's query.",
         "explain": f"The user asked: {state['question']}",
     }.get(intent, state["question"])
-    results_note = ""
-    results = state.get("results")
-    if results:
-        preview = results["rows"][:3]
-        results_note = (
-            f"\nThe query returned {results['row_count']} row(s)"
-            f"{' (truncated)' if results['truncated'] else ''}. "
-            f"Columns: {', '.join(results['columns'])}. First rows: {preview}"
-        )
+    results_note = describe_results(state.get("results"))
+    writer = get_stream_writer()
     try:
-        result = chains.explain_sql(state["sql"], context, state["schema_prompt"], results_note)
+        result = chains.explain_sql(state["sql"], context, state["schema_prompt"], results_note,
+                                    on_token=lambda text: writer({"token": text}))
     except Exception:
         # The SQL is already validated (and maybe executed); don't lose it over the explanation.
         return {"explanation": {
@@ -289,7 +323,15 @@ def respond(state: AgentState) -> dict[str, Any]:
         "debug": state.get("debug"),
         "retries": state.get("retries") or 0,
         "tables": state.get("tables") or [],
+        "follow_ups": explanation.get("follow_ups") or [],
+        # Shown as "Modifying: ..." so users see which query a follow-up changed.
+        "based_on": state.get("last_question") if state["intent"] == "followup" else None,
     }
+    # Same dialect and formatting as the new SQL, so the UI can diff them line by line.
+    for key in ("optimization", "debug"):
+        if response[key]:
+            response[key] = {**response[key],
+                             "original_formatted": transpile(response[key]["original_sql"], dialect)}
     summary = f"{explanation.get('summary', '')}\nSQL: {sql}"
     return {
         "response": response,
@@ -320,7 +362,8 @@ def refuse(state: AgentState) -> dict[str, Any]:
 def clarify(state: AgentState) -> dict[str, Any]:
     question = state.get("clarification_question") or "Could you be more specific?"
     return {
-        "response": {"type": "clarification", "intent": "clarify", "message": question},
+        "response": {"type": "clarification", "intent": "clarify", "message": question,
+                     "options": state.get("clarification_options") or []},
         "messages": [AIMessage(content=question)],
     }
 

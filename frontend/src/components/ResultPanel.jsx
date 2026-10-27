@@ -2,8 +2,11 @@ import { useState } from "react";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import sql from "react-syntax-highlighter/dist/esm/languages/prism/sql";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { exportCsv } from "../lib/api.js";
+import { diffLines } from "../lib/diff.js";
 import { downloadFile, toCSV } from "../lib/download.js";
-import { IconCheck, IconCopy, IconDownload } from "./Icons.jsx";
+import BarChart, { chartSpec } from "./Chart.jsx";
+import { IconCheck, IconCopy, IconDownload, IconPencil, IconPlay } from "./Icons.jsx";
 
 SyntaxHighlighter.registerLanguage("sql", sql);
 
@@ -85,7 +88,84 @@ function ResultsTable({ results, error }) {
   );
 }
 
-export default function ResultPanel({ response, dark }) {
+function Diff({ before, after }) {
+  const lines = diffLines(before, after);
+  const changed = lines.filter((l) => l.type !== "same").length;
+  return (
+    <details className="mt-2 text-xs" open>
+      <summary className="cursor-pointer text-slate-500">Before → after ({changed} line{changed === 1 ? "" : "s"} changed)</summary>
+      <pre className="mt-1 max-h-72 overflow-auto rounded-lg bg-slate-50 py-2 font-mono text-[11px] leading-5 dark:bg-slate-800/60" aria-label="Diff of original and new query">
+        {lines.map((l, i) => (
+          <div
+            key={i}
+            className={`px-2 ${l.type === "add" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300"
+              : l.type === "del" ? "bg-rose-100 text-rose-800 line-through decoration-rose-400/60 dark:bg-rose-500/15 dark:text-rose-300" : ""}`}
+          >
+            <span className="mr-2 select-none opacity-60">{l.type === "add" ? "+" : l.type === "del" ? "−" : " "}</span>{l.text || " "}
+          </div>
+        ))}
+      </pre>
+    </details>
+  );
+}
+
+function CsvButton({ response }) {
+  const [state, setState] = useState("");
+  const { results } = response;
+  // The preview holds at most 100 rows; when it was cut off, fetch everything from the server.
+  const download = async () => {
+    if (!results.truncated) {
+      downloadFile("results.csv", toCSV(results.columns, results.rows), "text/csv");
+      return;
+    }
+    setState("Exporting…");
+    try {
+      const { blob, truncated } = await exportCsv(response.sql_sqlite);
+      downloadFile("results.csv", blob, "text/csv");
+      setState(truncated ? "Exported the first 50,000 rows" : "");
+    } catch (e) {
+      setState(e.message);
+    }
+  };
+  return (
+    <span className="flex items-center gap-1">
+      {state && <span className="text-[11px] text-slate-500">{state}</span>}
+      <button className="btn-ghost" onClick={download} title={results.truncated ? "Download every row, not just the preview" : "Download as CSV"}>
+        <IconDownload /> {results.truncated ? "Full CSV" : "CSV"}
+      </button>
+    </span>
+  );
+}
+
+function ResultsView({ results, error }) {
+  const spec = chartSpec(results);
+  const [view, setView] = useState(spec ? "chart" : "table");
+  if (!spec || error) return <ResultsTable results={results} error={error} />;
+  return (
+    <>
+      <div className="mb-2 inline-flex rounded-lg border border-slate-200 p-0.5 text-xs dark:border-slate-700" role="tablist">
+        {["chart", "table"].map((v) => (
+          <button
+            key={v}
+            role="tab"
+            aria-selected={view === v}
+            onClick={() => setView(v)}
+            className={`rounded-md px-2.5 py-1 capitalize ${view === v ? "bg-indigo-600 text-white" : "text-slate-600 dark:text-slate-300"}`}
+          >
+            {v}
+          </button>
+        ))}
+      </div>
+      {view === "chart" ? <BarChart results={results} spec={spec} /> : <ResultsTable results={results} error={error} />}
+    </>
+  );
+}
+
+export default function ResultPanel({ response, dark, onRun }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [running, setRunning] = useState(false);
+  const [runErrors, setRunErrors] = useState([]);
   if (!response) {
     return (
       <div className="grid h-full place-items-center p-8 text-center text-sm text-slate-400">
@@ -97,6 +177,24 @@ export default function ResultPanel({ response, dark }) {
     );
   }
   const r = response;
+  const startEdit = () => {
+    setDraft(r.sql);
+    setRunErrors([]);
+    setEditing(true);
+  };
+  const run = async () => {
+    setRunning(true);
+    setRunErrors([]);
+    try {
+      const out = await onRun(draft);
+      if (out.ok) setEditing(false);
+      else setRunErrors(out.errors);
+    } catch (e) {
+      setRunErrors([e.message]);
+    } finally {
+      setRunning(false);
+    }
+  };
   const ext = r.dialect === "sqlite" ? "sqlite" : r.dialect;
   const cost = r.cost;
   const indexRecs = [
@@ -110,6 +208,11 @@ export default function ResultPanel({ response, dark }) {
         title={`SQL · ${r.dialect}`}
         right={
           <>
+            {!editing && (
+              <button className="btn-ghost" onClick={startEdit} title="Edit this query and run it">
+                <IconPencil /> Edit
+              </button>
+            )}
             <CopyButton text={r.sql} />
             <button className="btn-ghost" onClick={() => downloadFile(`query.${ext}.sql`, r.sql + "\n", "application/sql")}>
               <IconDownload /> .sql
@@ -117,7 +220,34 @@ export default function ResultPanel({ response, dark }) {
           </>
         }
       >
-        <SqlCode code={r.sql} dark={dark} />
+        {editing ? (
+          <div>
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run(); }}
+              rows={Math.min(16, draft.split("\n").length + 1)}
+              spellCheck={false}
+              className="w-full rounded-lg border border-indigo-300 bg-slate-50 p-2 font-mono text-xs dark:border-indigo-500/40 dark:bg-slate-950"
+              aria-label="Edit SQL"
+            />
+            {runErrors.length > 0 && (
+              <ul role="alert" className="mt-1 list-disc pl-5 text-xs text-rose-600 dark:text-rose-400">
+                {runErrors.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            )}
+            <div className="mt-2 flex items-center gap-2">
+              <button className="btn-primary" onClick={run} disabled={running || !draft.trim()}>
+                <IconPlay className="h-3.5 w-3.5" /> {running ? "Running…" : "Validate & run"}
+              </button>
+              <button className="btn-ghost" onClick={() => setEditing(false)} disabled={running}>Cancel</button>
+              <span className="ml-auto text-[11px] text-slate-400">⌘/Ctrl+Enter · same read-only checks as generated SQL</span>
+            </div>
+          </div>
+        ) : (
+          <SqlCode code={r.sql} dark={dark} />
+        )}
+        {r.edited && !editing && <p className="mt-1.5 text-[11px] text-slate-500">Edited by you and re-validated.</p>}
         {r.dialect !== "sqlite" && (
           <p className="mt-1.5 text-[11px] text-slate-500">
             Transpiled from the validated SQLite query (which is what ran against the sample database).
@@ -150,10 +280,7 @@ export default function ResultPanel({ response, dark }) {
           ) : (
             <p className="text-sm text-slate-500">No issues found.</p>
           )}
-          <details className="mt-2 text-xs">
-            <summary className="cursor-pointer text-slate-500">Original query</summary>
-            <div className="mt-1"><SqlCode code={r.debug.original_sql} dark={dark} maxHeight="10rem" /></div>
-          </details>
+          <Diff before={r.debug.original_formatted || r.debug.original_sql} after={r.sql} />
         </Section>
       )}
 
@@ -163,10 +290,7 @@ export default function ResultPanel({ response, dark }) {
             {r.optimization.changes?.map((c, i) => <li key={i}>{c}</li>)}
             {r.optimization.removed_joins?.map((c, i) => <li key={`j${i}`}>Removed join: {c}</li>)}
           </ul>
-          <details className="mt-2 text-xs">
-            <summary className="cursor-pointer text-slate-500">Original query</summary>
-            <div className="mt-1"><SqlCode code={r.optimization.original_sql} dark={dark} maxHeight="10rem" /></div>
-          </details>
+          <Diff before={r.optimization.original_formatted || r.optimization.original_sql} after={r.sql} />
         </Section>
       )}
 
@@ -211,16 +335,9 @@ export default function ResultPanel({ response, dark }) {
 
       <Section
         title={r.results ? `Results · ${r.results.row_count}${r.results.truncated ? "+ (first rows)" : ""} rows · ${r.results.elapsed_ms} ms` : "Results"}
-        right={r.results?.row_count > 0 && (
-          <button
-            className="btn-ghost"
-            onClick={() => downloadFile("results.csv", toCSV(r.results.columns, r.results.rows), "text/csv")}
-          >
-            <IconDownload /> CSV
-          </button>
-        )}
+        right={r.results?.row_count > 0 && <CsvButton response={r} />}
       >
-        <ResultsTable results={r.results} error={r.execution_error} />
+        <ResultsView key={r.sql_sqlite} results={r.results} error={r.execution_error} />
       </Section>
     </div>
   );

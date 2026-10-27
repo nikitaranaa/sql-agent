@@ -64,13 +64,29 @@ Further documentation in [`docs/`](docs/):
 - ✅ Query cost estimation (`EXPLAIN QUERY PLAN` + row counts)
 - ✅ SQL syntax highlighting
 - ✅ Multiple dialects: SQLite, PostgreSQL, MySQL (via `sqlglot.transpile`)
-- ✅ CSV export of results, plus `.sql` download
+- ✅ CSV export: the preview locally, or **every row** from the server when the preview was cut off; plus `.sql` download
 - ✅ Prompt-injection protection (pattern detection + delimiters + code-level enforcement)
 - ✅ Dockerized deployment (backend + frontend + docker-compose + Render blueprint)
-- ✅ Unit and integration tests (125 tests, no API key needed) + CI workflow
-- ✅ Streaming responses: live progress for each graph step over server-sent events
-- ✅ Dark mode, conversation history, schema explorer
+- ✅ Unit and integration tests (160 tests, no API key needed; 2 more run against Postgres) + CI workflow
+- ✅ Streaming responses: live progress for each graph step, then the explanation **types out word by word**
+- ✅ Dark mode, conversation history (search + rename), schema explorer
 - ✅ Accuracy evaluation harness (execution accuracy against gold queries)
+
+**Usability**
+- **Clickable clarifications:** a vague question gets 2–3 specific options to pick from
+- **Follow-up suggestions** under each answer, and a **"Modifying: …"** tag showing which query a follow-up changed
+- **Edit & run:** tweak the generated SQL and run it; it passes the same validator as generated SQL
+- **Before/after diff** for optimized and debugged queries
+- **Automatic bar chart** for small grouped results (label + number), with a table view
+- **Inline preview** of the first rows in the chat; **Stop**, **Retry / Regenerate**, and **👍/👎 feedback** on answers
+- Wakes the free-tier backend as soon as the page opens, and says so if it's slow
+- Phone layout: Chat / Details tabs, and Details opens by itself when an answer arrives
+
+**Production readiness**
+- **Optional accounts** (scrypt-hashed passwords, signed tokens): conversations sync to the server and follow you across devices
+- **Persistent memory:** with `DATABASE_URL` (e.g. free Neon Postgres), accounts, chats, feedback *and* the agent's conversation memory survive restarts
+- **Rate limiting** per user (or IP) to protect the model quota
+- **BM25 schema retrieval** for large databases: only the relevant tables (plus their foreign-key neighbours) go into the prompt
 
 ---
 
@@ -174,7 +190,10 @@ All backend settings live in `backend/.env` (template: [`backend/.env.example`](
 | `QUERY_TIMEOUT_SECONDS` | `5` | Execution timeout |
 | `MAX_RETRIES` | `3` | Generation attempts before giving up |
 | `HISTORY_TURNS` | `6` | Chat turns sent to the intent classifier |
-| `CHECKPOINT_DB` | empty | Empty = in-memory conversation state; a file path persists it across restarts |
+| `CHECKPOINT_DB` | empty | Empty = in-memory conversation state; a file path persists it across restarts (ignored when `DATABASE_URL` is set) |
+| `DATABASE_URL` | empty | Postgres URL (e.g. Neon). Stores accounts, synced chats, feedback and the agent's memory persistently |
+| `SECRET_KEY` | random | Signs login tokens. Set it so sign-ins survive restarts (Render generates one) |
+| `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_PER_DAY` | `10` / `300` | Model-backed requests per user, or per IP when signed out |
 | `CORS_ORIGINS` | `http://localhost:5173,...` | Allowed frontend origins (`*.vercel.app` is always allowed) |
 
 Frontend: `VITE_API_URL` in `frontend/.env` points at the backend.
@@ -209,7 +228,8 @@ browse the schema in the sidebar (click a column to insert it into your message)
 
 ```bash
 cd backend
-pytest                  # 125 tests, no API key needed (a scripted fake LLM replaces every chain)
+pytest                  # 160 tests, no API key needed (a scripted fake LLM replaces every chain)
+TEST_DATABASE_URL=postgresql://... pytest tests/test_postgres.py   # optional: Postgres storage
 python -m eval.run_eval # needs an API key: execution accuracy + guardrail accuracy against the real model
 ```
 
@@ -219,7 +239,9 @@ python -m eval.run_eval # needs an API key: execution accuracy + guardrail accur
 | `tests/test_guards.py` | Injection, destructive and off-topic detection, including false-positive checks ("remove the state filter" is a follow-up, not a delete) |
 | `tests/test_graph.py` | End-to-end graph: generate, retry loop with exact errors, max retries, follow-ups, session isolation, refusals, clarification, optimize, debug, explain, dialect output, state reset between turns |
 | `tests/test_database.py` | The read-only connection refuses writes, row cap, timeout on a runaway cross join, cost estimates and index advice |
-| `tests/test_api.py` | REST + SSE endpoints, input validation, LLM-failure handling, history |
+| `tests/test_api.py` | REST + SSE endpoints, input validation, LLM-failure handling, history, restoring context from the browser after a restart |
+| `tests/test_features.py` | Streamed explanation, follow-up suggestions, "Modifying" tag, diff base, edit & run (and that it blocks writes), full CSV export, feedback, accounts, conversation sync and per-user isolation, rate limiting, BM25 schema retrieval |
+| `tests/test_postgres.py` | Postgres store, and conversation memory surviving a restart (runs when `TEST_DATABASE_URL` is set) |
 | `eval/run_eval.py` | 15 gold-query cases scored by **result-set equality** (execution accuracy) + 11 guardrail cases |
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the tests and the frontend build on every push.
@@ -253,6 +275,9 @@ sql-agent/
 │   │   ├── validation/     # validator.py (sqlglot AST checks), guards.py (input prefilters)
 │   │   ├── analysis/       # cost.py (query plan, cost estimate, index advice)
 │   │   ├── db/             # schema.sql, seed.py, database.py (read-only access)
+│   │   ├── auth.py         # optional accounts: password hashing, signed tokens
+│   │   ├── store.py        # accounts, synced chats, feedback (Postgres or SQLite)
+│   │   ├── ratelimit.py    # per-user / per-IP request limits
 │   │   ├── config.py       # settings from .env
 │   │   ├── llm.py          # provider factory (OpenAI / Anthropic / Groq)
 │   │   ├── schemas.py      # API request/response models
@@ -300,5 +325,6 @@ Full list in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md). The main ones:
 
 - A sample e-commerce/HR schema is used until the official one is provided. The agent introspects the database at startup, so swapping schemas needs no code changes ([docs/SCHEMA.md](docs/SCHEMA.md#swapping-in-the-provided-schema)).
 - Queries execute on SQLite. PostgreSQL/MySQL output is transpiled for display and is not executed.
-- Conversation memory is in RAM by default and is lost on restart. Set `CHECKPOINT_DB` to persist it. The UI also keeps history in the browser.
+- Without `DATABASE_URL`, the agent's conversation memory is in RAM and is lost on restart; the browser then sends its copy of the last valid query (re-validated) so follow-ups keep working. With `DATABASE_URL`, everything persists.
+- Rate limits are kept in the server's memory, which fits a single instance. Several instances would need a shared store such as Redis.
 - Index recommendations are advice only; the database is read-only and nothing is ever applied.

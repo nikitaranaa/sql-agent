@@ -18,3 +18,7 @@ services:
         sync: false          # entered manually in the Render dashboard, never committed
       - key: CORS_ORIGINS
         sync: false          # e.g. https://your-app.vercel.app
+      - key: SECRET_KEY
+        generateValue: true  # Render creates a random value once; sign-ins survive restarts
+      - key: DATABASE_URL
+        sync: false          # Neon Postgres URL; optional but needed for persistent accounts/memory

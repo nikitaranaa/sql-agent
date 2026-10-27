@@ -45,6 +45,24 @@ class Settings(BaseSettings):
     # Empty = in-memory (lost on restart). Set a path to persist with SqliteSaver.
     checkpoint_db: str = ""
 
+    # --- Accounts and persistent storage ---------------------------------
+    # Postgres URL (e.g. Neon). When set, it stores accounts, synced conversations,
+    # feedback AND the LangGraph checkpoints, so memory survives restarts.
+    database_url: str = ""
+    # Fallback store for accounts/conversations/feedback when DATABASE_URL is empty.
+    state_db: Path = BACKEND_DIR / "data" / "state.db"
+    # Signs login tokens. Empty = random per process (everyone is signed out on restart).
+    secret_key: str = ""
+    token_ttl_days: int = 30
+
+    # --- Abuse protection ------------------------------------------------
+    rate_limit_per_minute: int = 10   # model-backed requests per user (or IP) per minute
+    rate_limit_per_day: int = 300
+
+    # --- Export ----------------------------------------------------------
+    export_max_rows: int = 50_000
+    export_timeout_seconds: float = 15.0
+
     # --- API -------------------------------------------------------------
     # Comma-separated list of allowed frontend origins.
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"

@@ -54,6 +54,9 @@ flowchart TB
 | **Cost analysis** | `backend/app/analysis/cost.py` | Full scan vs index search, estimated rows read, index recommendations |
 | **Database** | `backend/app/db/` | Schema DDL, deterministic seed, read-only connection, timeout and row cap |
 | **LLM factory** | `backend/app/llm.py` | Provider switch (OpenAI / Anthropic / Groq), fast vs strong model |
+| **Accounts** | `backend/app/auth.py` | Optional sign-in: scrypt password hashes, signed (JWT) tokens |
+| **Store** | `backend/app/store.py` | Accounts, synced conversations and feedback, in Postgres (`DATABASE_URL`) or a local SQLite file. Separate from the read-only sample database |
+| **Rate limiting** | `backend/app/ratelimit.py` | Sliding-window limits per user, or per IP when signed out |
 
 ## Request lifecycle (one chat turn)
 
@@ -104,5 +107,9 @@ sequenceDiagram
 6. **Testable without an API key.** Nodes call `chains.<fn>` through the module, so tests
    replace them with a scripted fake and exercise the real graph, validator and database.
 7. **Scaling path.** `select_relevant_tables()` sends the whole schema when it is small
-   (≤ 25 tables). Beyond that it retrieves relevant tables plus their foreign-key
-   neighbours. Swapping the keyword score for embeddings changes no other code.
+   (≤ 25 tables). Beyond that it ranks tables with BM25 over their names, column names and
+   referenced tables, takes the top 8 and adds their foreign-key neighbours. Swapping BM25
+   for embeddings changes no other code.
+8. **Two kinds of storage.** The sample database is opened read-only, always. Everything
+   the app writes (accounts, chats, feedback, the agent's memory) goes to a separate store:
+   Postgres in production, a local file in development.

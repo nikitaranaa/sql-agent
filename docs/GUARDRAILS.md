@@ -40,7 +40,10 @@ flowchart TD
 | 5 | **GROUP BY** | `check_semantics` | Bare columns next to aggregates | Warning (SQLite picks an arbitrary value) |
 | 6 | **SQLite compile** | `explain_query_plan` | Anything sqlglot missed (unknown functions, type issues) | Error from the real engine |
 | 7 | **Read-only connection** | `connect_readonly` | Every write, even if all checks above failed | `file:app.db?mode=ro` + `PRAGMA query_only = ON` |
-| 8 | **Execution limits** | `execute_readonly`, `ensure_limit` | Huge results, runaway cross joins | `LIMIT 100` added when missing, `fetchmany` cap, progress-handler timeout (5 s) |
+| 8 | **Execution limits** | `execute_readonly`, `ensure_limit` | Huge results, runaway cross joins | `LIMIT 101` added when missing (one extra row detects truncation; 100 are shown), `fetchmany` cap, progress-handler timeout (5 s). Full CSV export: 50,000 rows, 15 s |
+| 9 | **Rate limits** | `ratelimit.py` | Burning the shared model quota | 10 requests/minute and 300/day per user (per IP when signed out); HTTP 429 with a clear message |
+| 10 | **Edited SQL** | `POST /run` | Bypassing checks by editing the generated query | User-edited SQL goes through the **same validator** and read-only connection as generated SQL |
+| 11 | **Accounts** | `auth.py` | Reading someone else's chats or memory | Passwords hashed with scrypt; signed tokens; conversations and server memory are scoped to the user; a forged or expired token is rejected, not treated as anonymous |
 
 Validation runs on **every** SQL string, including the user's own SQL in explain/optimize/debug,
 and LLM output on every retry.

@@ -7,3 +7,4 @@ tests
 eval
 app/db/app.db
 checkpoints.db
+data

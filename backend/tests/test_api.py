@@ -94,3 +94,37 @@ def test_graph_endpoint_returns_mermaid(client):
 def test_root_redirects_to_docs(client):
     r = client.get("/", follow_redirects=False)
     assert r.status_code in (302, 307) and r.headers["location"] == "/docs"
+
+
+def test_followup_restores_context_from_browser_after_server_restart(client, fake_llm):
+    # Fresh session id = the server has no memory of it, as after a restart.
+    fake_llm.queue_intent("followup")
+    fake_llm.sqls.append("SELECT * FROM Customers WHERE State = 'CA'")
+    body = client.post("/chat", json={
+        "session_id": sid(), "message": "Only those from California",
+        "previous_sql": "SELECT * FROM Customers", "previous_question": "Show all customers",
+    }).json()
+    assert body["type"] == "sql"
+    call = fake_llm.called("generate_sql")[-1]
+    assert call["previous_sql"] == "SELECT * FROM Customers"
+    assert call["previous_question"] == "Show all customers"
+
+
+@pytest.mark.parametrize("bad", ["DELETE FROM Customers", "SELECT Nope FROM Customers"])
+def test_invalid_browser_context_is_ignored(client, fake_llm, bad):
+    fake_llm.queue_intent("followup")
+    fake_llm.sqls.append("SELECT * FROM Customers")
+    client.post("/chat", json={"session_id": sid(), "message": "only CA", "previous_sql": bad})
+    assert fake_llm.called("generate_sql")[-1]["previous_sql"] is None
+
+
+def test_server_memory_wins_over_browser_context(client, fake_llm):
+    session = sid()
+    fake_llm.queue_intent("generate")
+    fake_llm.sqls.append("SELECT * FROM Products")
+    client.post("/chat", json={"session_id": session, "message": "show products"})
+    fake_llm.queue_intent("followup")
+    fake_llm.sqls.append("SELECT * FROM Products LIMIT 5")
+    client.post("/chat", json={"session_id": session, "message": "only 5",
+                               "previous_sql": "SELECT * FROM Orders"})
+    assert fake_llm.called("generate_sql")[-1]["previous_sql"] == "SELECT * FROM Products"
