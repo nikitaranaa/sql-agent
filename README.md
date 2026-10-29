@@ -41,9 +41,7 @@ Further documentation in [`docs/`](docs/):
 | [SCHEMA.md](docs/SCHEMA.md) | Sample database schema, ER diagram, and how to swap in the provided schema |
 | [GUARDRAILS.md](docs/GUARDRAILS.md) | The layered safety design and the attack prompts it is tested against |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, Render, Vercel step by step |
-| [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | A 3–5 minute demo-video script |
 | [ASSUMPTIONS.md](docs/ASSUMPTIONS.md) | Assumptions made during development |
-| [INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md) | Design Q&A: why each decision was made |
 
 ---
 
@@ -204,7 +202,7 @@ Frontend: `VITE_API_URL` in `frontend/.env` points at the backend.
 
 ## Using the app
 
-Try these in order. The same list is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
+Try these in order:
 
 | Type | Example |
 |---|---|
@@ -316,7 +314,7 @@ sql-agent/
 | 5 LangGraph, FastAPI, SQLite, schema-only generation | [`graph/builder.py`](backend/app/graph/builder.py), [`main.py`](backend/app/main.py), schema in every prompt + column validation |
 | 6 Workflow (intent → scope → schema → generate → validate → optimize → execute → explain) | Same order in the graph; "SQL Optimization" is `analyze_query` (cost + index advice) |
 | 7 Guardrails | [docs/GUARDRAILS.md](docs/GUARDRAILS.md) |
-| 8 Deliverables | Code, README, [architecture](docs/ARCHITECTURE.md), [workflow](docs/WORKFLOW.md), [prompts](docs/PROMPTS.md), [schema](docs/SCHEMA.md), [demo script](docs/DEMO_SCRIPT.md), deployment configs |
+| 8 Deliverables | Code, README, [architecture](docs/ARCHITECTURE.md), [workflow](docs/WORKFLOW.md), [prompts](docs/PROMPTS.md), [schema](docs/SCHEMA.md), live deployment, deployment configs |
 | 11 Assumptions | [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md) |
 
 ---
